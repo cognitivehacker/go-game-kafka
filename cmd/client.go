@@ -22,14 +22,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	surface.FillRect(nil, 0)
 	log.Println("Start running")
 	running := true
-	x := 1
-	y := 1
+	var x int32 = 200
+	var y int32 = 200
 	for running {
-		x += 1
-		y += 1
+		surface.FillRect(nil, 0)
+
 		pl1 := sdl.Rect{x, y, 20, 20}
 		pl2 := sdl.Rect{400, 400, 20, 20}
 		surface.FillRect(&pl1, 0xffee0000)
@@ -44,6 +43,7 @@ func main() {
 				switch t.Keysym.Sym {
 				case sdl.K_UP:
 					if t.State == sdl.RELEASED {
+						y--
 						println("Foo Balr")
 					}
 					keys += "Left Alt"

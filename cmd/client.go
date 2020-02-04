@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"math/rand"
 
 	"github.com/veandco/go-sdl2/sdl"
 )
@@ -21,7 +22,15 @@ func (p Player) draw(window **sdl.Window) {
 		panic(err)
 	}
 	surface.FillRect(&pl1, 0xffee0000)
-	w.UpdateSurface()
+	// w.UpdateSurface()
+}
+
+func randomPlayer() Player {
+	return Player{
+		x:      int32(rand.Intn(800)),
+		y:      int32(rand.Intn(600)),
+		width:  10,
+		height: 10}
 }
 
 func main() {
@@ -44,15 +53,23 @@ func main() {
 	}
 	log.Println("Start running")
 	running := true
-	newPlayer := Player{x: 300, y: 300, width: 10, height: 10}
+
+	var players = []Player{}
+
+	players = append(players, randomPlayer())
+	players = append(players, randomPlayer())
+	players = append(players, randomPlayer())
+	players = append(players, randomPlayer())
 
 	for running {
 		// Clear window for each frame
 		surface.FillRect(nil, 0)
 
-		newPlayer.draw(&window)
-
+		for _, p := range players {
+			p.draw(&window)
+		}
 		window.UpdateSurface()
+
 		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 			switch t := event.(type) {
 			case *sdl.KeyboardEvent:
@@ -60,19 +77,19 @@ func main() {
 				switch t.Keysym.Sym {
 				case sdl.K_UP:
 					if t.State == sdl.PRESSED {
-						newPlayer.y -= 5
+						players[0].y -= 5
 					}
 				case sdl.K_DOWN:
 					if t.State == sdl.PRESSED {
-						newPlayer.y += 5
+						players[0].y += 5
 					}
 				case sdl.K_LEFT:
 					if t.State == sdl.PRESSED {
-						newPlayer.x -= 5
+						players[0].x -= 5
 					}
 				case sdl.K_RIGHT:
 					if t.State == sdl.PRESSED {
-						newPlayer.x += 5
+						players[0].x += 5
 					}
 				}
 			case *sdl.QuitEvent:

@@ -3,3 +3,7 @@ Is an atempt to make a game client to connect to kafka server and stream the dat
 
 ## RUN
 `go run cmd/client.go`
+
+## RUN kafka
+
+`docker-compose up`

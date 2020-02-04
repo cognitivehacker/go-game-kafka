@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math/rand"
+	"strings"
+	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/google/uuid"
+	"github.com/segmentio/kafka-go"
 	"github.com/veandco/go-sdl2/sdl"
 )
 
@@ -63,6 +67,7 @@ func main() {
 	players = append(players, randomPlayer())
 	players = append(players, randomPlayer())
 
+	// GAME LOOP
 	for running {
 		// Clear window for each frame
 		surface.FillRect(nil, 0)
@@ -104,62 +109,59 @@ func main() {
 }
 
 func consumer() {
-	c, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers": "localhost",
-		"group.id":          "myGroup",
-		"auto.offset.reset": "earliest",
-	})
+	// get kafka reader using environment variables.
+	kafkaURL := "localhost:29092"
+	topic := "mytopic"
+	groupID := "groupID"
 
-	if err != nil {
-		panic(err)
-	}
+	reader := getKafkaReader(kafkaURL, topic, groupID)
 
-	c.SubscribeTopics([]string{"myTopic", "^aRegex.*[Tt]opic"}, nil)
+	defer reader.Close()
 
+	fmt.Println("start consuming ... !!")
 	for {
-		msg, err := c.ReadMessage(-1)
-		if err == nil {
-			fmt.Printf("Message on %s: %s\n", msg.TopicPartition, string(msg.Value))
-		} else {
-			// The client will automatically try to recover from all errors.
-			fmt.Printf("Consumer error: %v (%v)\n", err, msg)
+		m, err := reader.ReadMessage(context.Background())
+		if err != nil {
+			log.Fatalln(err)
 		}
+		fmt.Printf("message at topic:%v partition:%v offset:%v	%s = %s\n", m.Topic, m.Partition, m.Offset, string(m.Key), string(m.Value))
 	}
-
-	c.Close()
 }
 
 func producer() {
-	p, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": "localhost"})
-	if err != nil {
-		panic(err)
-	}
-
-	defer p.Close()
-
-	// Delivery report handler for produced messages
-	go func() {
-		for e := range p.Events() {
-			switch ev := e.(type) {
-			case *kafka.Message:
-				if ev.TopicPartition.Error != nil {
-					fmt.Printf("Delivery failed: %v\n", ev.TopicPartition)
-				} else {
-					fmt.Printf("Delivered message to %v\n", ev.TopicPartition)
-				}
-			}
+	kafkaURL := "localhost:29092"
+	topic := "mytopic"
+	writer := newKafkaWriter(kafkaURL, topic)
+	defer writer.Close()
+	fmt.Println("start producing ... !!")
+	for i := 0; ; i++ {
+		msg := kafka.Message{
+			Key:   []byte(fmt.Sprintf("Key-%d", i)),
+			Value: []byte(fmt.Sprint(uuid.New())),
 		}
-	}()
-
-	// Produce messages to topic (asynchronously)
-	topic := "myTopic"
-	for _, word := range []string{"Welcome", "to", "the", "Confluent", "Kafka", "Golang", "client"} {
-		p.Produce(&kafka.Message{
-			TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
-			Value:          []byte(word),
-		}, nil)
+		err := writer.WriteMessages(context.Background(), msg)
+		if err != nil {
+			fmt.Println(err)
+		}
+		time.Sleep(1 * time.Second)
 	}
+}
 
-	// Wait for message deliveries before shutting down
-	p.Flush(15 * 1000)
+func newKafkaWriter(kafkaURL, topic string) *kafka.Writer {
+	return kafka.NewWriter(kafka.WriterConfig{
+		Brokers:  []string{kafkaURL},
+		Topic:    topic,
+		Balancer: &kafka.LeastBytes{},
+	})
+}
+
+func getKafkaReader(kafkaURL, topic, groupID string) *kafka.Reader {
+	brokers := strings.Split(kafkaURL, ",")
+	return kafka.NewReader(kafka.ReaderConfig{
+		Brokers:  brokers,
+		GroupID:  groupID,
+		Topic:    topic,
+		MinBytes: 10e3, // 10KB
+		MaxBytes: 10e6, // 10MB
+	})
 }

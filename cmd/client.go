@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,10 +33,15 @@ type KfkPlayerData struct {
 }
 
 func main() {
+
 	log.Println("Start running")
+
+	var wg sync.WaitGroup
+
 	messages := make(chan KfkPlayerData)
 
 	// INITIATE KAFKA CONSUMER
+	wg.Add(1)
 	go consumer(messages)
 
 	// MAP OF PLAYERS
@@ -51,34 +57,37 @@ func main() {
 		Height: 10,
 		Color:  0xffee0000}
 
+	wg.Add(1)
 	go gameLoop(players, playerUUID)
 
 	// // CONSUME KAFKA MESSAGES
 	updatedData := <-messages
 
+	fmt.Printf("Updated Data: %+v\n", updatedData)
 	// Player already in map
 	if val, ok := players[updatedData.Uuid]; ok {
 		fmt.Printf("Player ALREADY Exists %d", updatedData.Uuid)
 		println("", val)
-		// player := players[updatedData.Uuid]
-		// player.Uuid = updatedData.Uuid
-		// player.X = updatedData.X
-		// player.Y = updatedData.Y
-		// player.Width = updatedData.Width
-		// player.Height = updatedData.Height
-		// player.Color = updatedData.Color
-		// Player is new
-	} else {
-		fmt.Printf("Player IS NEW %d", updatedData.Uuid)
-		// players[updatedData.Uuid] = &Player{
-		// 	Uuid:   updatedData.Uuid,
-		// 	X:      updatedData.X,
-		// 	Y:      updatedData.Y,
-		// 	Width:  updatedData.Width,
-		// 	Height: updatedData.Height,
-		// 	Color:  updatedData.Color}
-	}
+		player := players[updatedData.Uuid]
+		player.Uuid = updatedData.Uuid
+		player.X = updatedData.X
+		player.Y = updatedData.Y
+		player.Width = updatedData.Width
+		player.Height = updatedData.Height
+		player.Color = updatedData.Color
 
+	} else {
+		// Player is new
+		fmt.Printf("Player IS NEW %d", updatedData.Uuid)
+		players[updatedData.Uuid] = &Player{
+			Uuid:   updatedData.Uuid,
+			X:      updatedData.X,
+			Y:      updatedData.Y,
+			Width:  updatedData.Width,
+			Height: updatedData.Height,
+			Color:  updatedData.Color}
+	}
+	wg.Wait()
 }
 
 func gameLoop(players map[uuid.UUID]*Player, playerUUID uuid.UUID) {

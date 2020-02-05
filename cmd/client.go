@@ -14,10 +14,12 @@ import (
 )
 
 type Player struct {
+	uuid   uuid.UUID
 	x      int32
 	y      int32
 	width  int32
 	height int32
+	color  uint32
 }
 
 func (p Player) draw(window **sdl.Window) {
@@ -27,7 +29,10 @@ func (p Player) draw(window **sdl.Window) {
 	if err != nil {
 		panic(err)
 	}
-	surface.FillRect(&pl1, 0xffee0000)
+	if p.color == 0 {
+		p.color = 0xffee0000
+	}
+	surface.FillRect(&pl1, p.color)
 	// w.UpdateSurface()
 }
 
@@ -36,7 +41,8 @@ func randomPlayer() Player {
 		x:      int32(rand.Intn(800)),
 		y:      int32(rand.Intn(600)),
 		width:  10,
-		height: 10}
+		height: 10,
+		color:  0xffee0000}
 }
 
 func main() {
@@ -60,12 +66,16 @@ func main() {
 	log.Println("Start running")
 	running := true
 
-	var players = []Player{}
-
-	players = append(players, randomPlayer())
-	players = append(players, randomPlayer())
-	players = append(players, randomPlayer())
-	players = append(players, randomPlayer())
+	// MAP OF PLAYERS
+	players := make(map[uuid.UUID]*Player)
+	var playerUUID uuid.UUID = uuid.New()
+	players[playerUUID] = &Player{
+		uuid:   playerUUID,
+		x:      int32(rand.Intn(800)),
+		y:      int32(rand.Intn(600)),
+		width:  10,
+		height: 10,
+		color:  0xffee0000}
 
 	// GAME LOOP
 	for running {
@@ -77,6 +87,8 @@ func main() {
 		}
 		window.UpdateSurface()
 
+		player := players[playerUUID]
+
 		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 			switch t := event.(type) {
 			case *sdl.KeyboardEvent:
@@ -84,19 +96,19 @@ func main() {
 				switch t.Keysym.Sym {
 				case sdl.K_UP:
 					if t.State == sdl.PRESSED {
-						players[0].y -= 5
+						player.y -= 5
 					}
 				case sdl.K_DOWN:
 					if t.State == sdl.PRESSED {
-						players[0].y += 5
+						player.y += 5
 					}
 				case sdl.K_LEFT:
 					if t.State == sdl.PRESSED {
-						players[0].x -= 5
+						player.x -= 5
 					}
 				case sdl.K_RIGHT:
 					if t.State == sdl.PRESSED {
-						players[0].x += 5
+						player.x += 5
 					}
 				}
 			case *sdl.QuitEvent:

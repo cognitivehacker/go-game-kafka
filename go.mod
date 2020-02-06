@@ -7,4 +7,5 @@ require (
 	github.com/google/uuid v1.1.1
 	github.com/segmentio/kafka-go v0.3.5
 	github.com/veandco/go-sdl2 v0.4.0
+	gopkg.in/confluentinc/confluent-kafka-go.v1 v1.1.0
 )

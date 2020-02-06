@@ -6,17 +6,21 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
 	"github.com/veandco/go-sdl2/sdl"
+	k "gopkg.in/confluentinc/confluent-kafka-go.v1/kafka"
 )
 
 type Player struct {
-	Uuid   uuid.UUID
+	UUID   uuid.UUID
 	X      int32
 	Y      int32
 	Width  int32
@@ -26,13 +30,13 @@ type Player struct {
 }
 
 type KfkPlayerData struct {
-	Uuid   uuid.UUID `json:"uuid"`
+	UUID   uuid.UUID `json:"uuid"`
 	X      int32     `json:"x"`
 	Y      int32     `json:"y"`
 	Width  int32     `json:"Width"`
 	Height int32     `json:"Height"`
 	Color  uint32    `json:"Color"`
-	Date   string	 `json:"Date"`
+	Date   string    `json:"Date"`
 }
 
 func main() {
@@ -45,16 +49,18 @@ func main() {
 
 	// INITIATE KAFKA CONSUMER
 	wg.Add(1)
-	go consumer(messages)
+
+	var playerUUID uuid.UUID = uuid.New()
+
+	go consumer(messages, playerUUID.String())
 
 	// MAP OF PLAYERS
 	players := make(map[uuid.UUID]*Player)
 
 	// CREATE MY PLAYER
-	var playerUUID uuid.UUID = uuid.New()
 
 	player := Player{
-		Uuid:   playerUUID,
+		UUID:   playerUUID,
 		X:      int32(rand.Intn(800)),
 		Y:      int32(rand.Intn(600)),
 		Width:  10,
@@ -77,11 +83,11 @@ func main() {
 
 		fmt.Printf("Updated Data: %+v\n", updatedData)
 		// Player already in map
-		if val, ok := players[updatedData.Uuid]; ok {
-			fmt.Printf("Player ALREADY Exists %v \n", updatedData.Uuid)
+		if val, ok := players[updatedData.UUID]; ok {
+			fmt.Printf("Player ALREADY Exists %v \n", updatedData.UUID)
 			println("", val)
-			player := players[updatedData.Uuid]
-			player.Uuid = updatedData.Uuid
+			player := players[updatedData.UUID]
+			player.UUID = updatedData.UUID
 			player.X = updatedData.X
 			player.Y = updatedData.Y
 			player.Width = updatedData.Width
@@ -90,9 +96,9 @@ func main() {
 
 		} else {
 			// Player is new
-			fmt.Printf("Player IS NEW %v \n", updatedData.Uuid)
-			players[updatedData.Uuid] = &Player{
-				Uuid:   updatedData.Uuid,
+			fmt.Printf("Player IS NEW %v \n", updatedData.UUID)
+			players[updatedData.UUID] = &Player{
+				UUID:   updatedData.UUID,
 				X:      updatedData.X,
 				Y:      updatedData.Y,
 				Width:  updatedData.Width,
@@ -111,7 +117,10 @@ func gameLoop(players *map[uuid.UUID]*Player, playerUUID uuid.UUID) {
 	}
 	defer sdl.Quit()
 	log.Println("Creating window")
-	window, err := sdl.CreateWindow("test", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED,
+
+	WindowName := string(os.Args[1])
+
+	window, err := sdl.CreateWindow(WindowName, sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED,
 		800, 600, sdl.WINDOW_SHOWN)
 	if err != nil {
 		panic(err)
@@ -192,28 +201,70 @@ func randomPlayer() Player {
 		Color:  0xffee0000}
 }
 
-func consumer(messages chan<- KfkPlayerData) {
-	// get kafka reader using environment variables.
-	kafkaURL := "localhost:29092"
-	topic := "mytopic"
-	partition := 0
+//consumer Consumer Kafka
+func consumer(messages chan<- KfkPlayerData, group string) {
 
-	reader := getKafkaReader(kafkaURL, topic, partition)
+	broker := "localhost:29092"
+	topics := []string{"mytopic"}
+	sigchan := make(chan os.Signal, 1)
+	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
 
-	defer reader.Close()
+	c, err := k.NewConsumer(&k.ConfigMap{
+		"bootstrap.servers":     broker,
+		"broker.address.family": "v4",
+		"group.id":              group,
+		"session.timeout.ms":    6000,
+		"auto.offset.reset":     "earliest",
+	})
 
-	fmt.Println("start consuming ... !!")
-	for {
-		m, err := reader.ReadMessage(context.Background())
-		if err != nil {
-			log.Fatalln(err)
-		}
-		var response KfkPlayerData
-		json.Unmarshal([]byte(m.Value), &response)
+	defer c.Close()
 
-		fmt.Printf("consumer response: %+v\n\n#################\n", response)
-		messages <- response
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create consumer: %s\n", err)
+		os.Exit(1)
 	}
+
+	err = c.SubscribeTopics(topics, nil)
+
+	run := true
+
+	for run == true {
+		select {
+		case sig := <-sigchan:
+			fmt.Printf("Caught signal %v: terminating\n", sig)
+			run = false
+		default:
+			ev := c.Poll(100)
+			if ev == nil {
+				continue
+			}
+
+			switch e := ev.(type) {
+			case *k.Message:
+
+				var response KfkPlayerData
+				json.Unmarshal(e.Value, &response)
+
+				fmt.Printf("consumer response: %+v\n\n#################\n", response)
+				messages <- response
+
+			case k.Error:
+				// Errors should generally be considered
+				// informational, the client will try to
+				// automatically recover.
+				// But in this example we choose to terminate
+				// the application if all brokers are down.
+				fmt.Fprintf(os.Stderr, "%% Error: %v: %v\n", e.Code(), e)
+				if e.Code() == k.ErrAllBrokersDown {
+					run = false
+				}
+			default:
+			}
+		}
+	}
+
+	fmt.Printf("Closing consumer\n")
+
 }
 
 func produce(player Player) {
@@ -231,7 +282,7 @@ func produce(player Player) {
 	writer := newKafkaWriter(kafkaURL, topic)
 	defer writer.Close()
 	msg := kafka.Message{
-		Key:   []byte(fmt.Sprintf("Key-%d", player.Uuid)),
+		Key:   []byte(fmt.Sprintf("Key-%d", player.UUID)),
 		Value: []byte(fmt.Sprint(string(playerJson))),
 	}
 	err2 := writer.WriteMessages(context.Background(), msg)
@@ -253,14 +304,13 @@ func getKafkaReader(kafkaURL, topic string, partition int) *kafka.Reader {
 	brokers := strings.Split(kafkaURL, ",")
 
 	return kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  brokers,
-		Partition:  partition,
-		Topic:    topic,
-		MinBytes: 10e3, // 10KB
-		MaxBytes: 10e6, // 10MB
-		ReadBackoffMin: time.Microsecond * 1,
-		ReadBackoffMax: time.Microsecond * 2,
+		Brokers:         brokers,
+		Partition:       partition,
+		Topic:           topic,
+		MinBytes:        10e3, // 10KB
+		MaxBytes:        10e6, // 10MB
+		ReadBackoffMin:  time.Microsecond * 1,
+		ReadBackoffMax:  time.Microsecond * 2,
 		ReadLagInterval: -1,
-
 	})
 }

@@ -22,7 +22,9 @@ type Player struct {
 	Width  int32
 	Height int32
 	Color  uint32
+	Date   string
 }
+
 type KfkPlayerData struct {
 	Uuid   uuid.UUID `json:"uuid"`
 	X      int32     `json:"x"`
@@ -30,6 +32,7 @@ type KfkPlayerData struct {
 	Width  int32     `json:"Width"`
 	Height int32     `json:"Height"`
 	Color  uint32    `json:"Color"`
+	Date   string	 `json:"Date"`
 }
 
 func main() {
@@ -38,7 +41,7 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	messages := make(chan KfkPlayerData)
+	messages := make(chan KfkPlayerData, 1000)
 
 	// INITIATE KAFKA CONSUMER
 	wg.Add(1)
@@ -49,7 +52,8 @@ func main() {
 
 	// CREATE MY PLAYER
 	var playerUUID uuid.UUID = uuid.New()
-	players[playerUUID] = &Player{
+
+	player := Player{
 		Uuid:   playerUUID,
 		X:      int32(rand.Intn(800)),
 		Y:      int32(rand.Intn(600)),
@@ -57,8 +61,12 @@ func main() {
 		Height: 10,
 		Color:  0xffee0000}
 
+	players[playerUUID] = &player
+
+	go produce(player)
+
 	wg.Add(1)
-	go gameLoop(players, playerUUID)
+	go gameLoop(&players, playerUUID)
 
 	// CONSUME KAFKA MESSAGES
 	for {
@@ -95,7 +103,7 @@ func main() {
 	wg.Wait()
 }
 
-func gameLoop(players map[uuid.UUID]*Player, playerUUID uuid.UUID) {
+func gameLoop(players *map[uuid.UUID]*Player, playerUUID uuid.UUID) {
 	// Create Game window
 	var window *sdl.Window
 	if err := sdl.Init(sdl.INIT_EVERYTHING); err != nil {
@@ -120,12 +128,12 @@ func gameLoop(players map[uuid.UUID]*Player, playerUUID uuid.UUID) {
 		surface.FillRect(nil, 0)
 
 		// DRAW PLAYERS
-		for _, p := range players {
+		for _, p := range *players {
 			p.draw(&window)
 		}
 		window.UpdateSurface()
 
-		myPlayer := players[playerUUID]
+		myPlayer := (*players)[playerUUID]
 
 		// KEYBOARD EVENTS
 		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
@@ -188,9 +196,9 @@ func consumer(messages chan<- KfkPlayerData) {
 	// get kafka reader using environment variables.
 	kafkaURL := "localhost:29092"
 	topic := "mytopic"
-	groupID := "groupID"
+	partition := 0
 
-	reader := getKafkaReader(kafkaURL, topic, groupID)
+	reader := getKafkaReader(kafkaURL, topic, partition)
 
 	defer reader.Close()
 
@@ -202,17 +210,22 @@ func consumer(messages chan<- KfkPlayerData) {
 		}
 		var response KfkPlayerData
 		json.Unmarshal([]byte(m.Value), &response)
+
 		fmt.Printf("consumer response: %+v\n\n#################\n", response)
 		messages <- response
 	}
 }
 
 func produce(player Player) {
+
+	player.Date = time.Now().String()
 	playerJson, err := json.Marshal(player)
+
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+
 	kafkaURL := "localhost:29092"
 	topic := "mytopic"
 	writer := newKafkaWriter(kafkaURL, topic)
@@ -236,13 +249,18 @@ func newKafkaWriter(kafkaURL, topic string) *kafka.Writer {
 	})
 }
 
-func getKafkaReader(kafkaURL, topic, groupID string) *kafka.Reader {
+func getKafkaReader(kafkaURL, topic string, partition int) *kafka.Reader {
 	brokers := strings.Split(kafkaURL, ",")
+
 	return kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  brokers,
-		GroupID:  groupID,
+		Partition:  partition,
 		Topic:    topic,
 		MinBytes: 10e3, // 10KB
 		MaxBytes: 10e6, // 10MB
+		ReadBackoffMin: time.Microsecond * 1,
+		ReadBackoffMax: time.Microsecond * 2,
+		ReadLagInterval: -1,
+
 	})
 }

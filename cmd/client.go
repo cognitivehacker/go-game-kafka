@@ -60,32 +60,37 @@ func main() {
 	wg.Add(1)
 	go gameLoop(players, playerUUID)
 
-	// // CONSUME KAFKA MESSAGES
-	updatedData := <-messages
+	// CONSUME KAFKA MESSAGES
+	for {
+		updatedData, ok := <-messages
+		if ok == false {
+			break
+		}
 
-	fmt.Printf("Updated Data: %+v\n", updatedData)
-	// Player already in map
-	if val, ok := players[updatedData.Uuid]; ok {
-		fmt.Printf("Player ALREADY Exists %d", updatedData.Uuid)
-		println("", val)
-		player := players[updatedData.Uuid]
-		player.Uuid = updatedData.Uuid
-		player.X = updatedData.X
-		player.Y = updatedData.Y
-		player.Width = updatedData.Width
-		player.Height = updatedData.Height
-		player.Color = updatedData.Color
+		fmt.Printf("Updated Data: %+v\n", updatedData)
+		// Player already in map
+		if val, ok := players[updatedData.Uuid]; ok {
+			fmt.Printf("Player ALREADY Exists %v \n", updatedData.Uuid)
+			println("", val)
+			player := players[updatedData.Uuid]
+			player.Uuid = updatedData.Uuid
+			player.X = updatedData.X
+			player.Y = updatedData.Y
+			player.Width = updatedData.Width
+			player.Height = updatedData.Height
+			player.Color = updatedData.Color
 
-	} else {
-		// Player is new
-		fmt.Printf("Player IS NEW %d", updatedData.Uuid)
-		players[updatedData.Uuid] = &Player{
-			Uuid:   updatedData.Uuid,
-			X:      updatedData.X,
-			Y:      updatedData.Y,
-			Width:  updatedData.Width,
-			Height: updatedData.Height,
-			Color:  updatedData.Color}
+		} else {
+			// Player is new
+			fmt.Printf("Player IS NEW %v \n", updatedData.Uuid)
+			players[updatedData.Uuid] = &Player{
+				Uuid:   updatedData.Uuid,
+				X:      updatedData.X,
+				Y:      updatedData.Y,
+				Width:  updatedData.Width,
+				Height: updatedData.Height,
+				Color:  updatedData.Color}
+		}
 	}
 	wg.Wait()
 }
@@ -197,10 +202,8 @@ func consumer(messages chan<- KfkPlayerData) {
 		}
 		var response KfkPlayerData
 		json.Unmarshal([]byte(m.Value), &response)
+		fmt.Printf("consumer response: %+v\n\n#################\n", response)
 		messages <- response
-
-		fmt.Printf("message at topic:%v partition:%v offset:%v	%s = %s\n",
-			m.Topic, m.Partition, m.Offset, string(m.Key), string(m.Value))
 	}
 }
 
